@@ -3,6 +3,13 @@ $NOLIST
 $MODEFM8LB1
 $LIST
 
+Button_Press_Check mac
+	jb %0, loop  ; if the 'BOOT' button is not pressed skip
+	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
+	jb %0, loop  ; if the 'BOOT' button is not pressed skip
+	jnb %0, $
+	ljmp sudo_reset_ISR
+	endmac	
 ;------------------------------------------------------------------------------------------------------
 ;====================
 ;HARDWARE PARAMETERS:
@@ -65,6 +72,7 @@ hour: ds 1
 bseg
 one_second_flag: dbit 1 ;
 am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
+mode:dbit 1
 
 
 ;------------------------------------------------------------------------------------------------------
@@ -74,7 +82,9 @@ am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
 BOOT_BUTTON   equ P3.7
 SOUND_OUT     equ P2.1
 UPDOWN        equ P0.0
-
+RESET_TIME    equ p0.1
+MODE_ADJUST   equ p0.3
+SECOND_ADJUST equ p0.5
 cseg
 LCD_RS equ P2.0
 LCD_RW equ P1.7
@@ -113,18 +123,17 @@ Initialize_All:
 	
 	; Switch clock to 24 MHz
 	mov	CLKSEL, #0x00 ; 
-	mov	CLKSEL, #0x00 ; Second write to CLKSEL is required according to the user manual (page 77)
+	mov	CLKSEL, #0x00 ; Second write to CLKSEL 
 	
-	; Wait for 24 MHz clock to stabilze by checking bit DIVRDY in CLKSEL
+
 waitclockstable:
 	mov a, CLKSEL
 	jnb acc.7, waitclockstable 
 
-	; Initialize the two timers used in this program
     lcall Timer0_Init
 
 
-    lcall LCD_4BIT ; Initialize LCD
+    lcall LCD_4BIT 
     
     setb EA   ; Enable Global interrupts
 
@@ -137,18 +146,20 @@ waitclockstable:
 
 Timer0_Init:
 	mov CKCON0, #00000010B ; Timer 0 uses the system clock/48
+	
 	mov a, TMOD
 	anl a, #0xf0 ; Clear the bits for timer 0
 	orl a, #0x01 ; Configure timer 0 as 16-timer
 	mov TMOD, a
+	
 	mov TH0, #high(TIMER0_RELOAD)
 	mov TL0, #low(TIMER0_RELOAD)
-	; Enable the timer and interrupts
+	
     setb ET0  ; Enable timer 0 interrupt
     setb TR0  ; Start timer 0
 	ret
 ;=======================
-;ISR for TIMER 1
+;ISR for TIMER 0
 ;=======================	
 Timer0_ISR:
 	clr TF0
@@ -184,7 +195,11 @@ Timer0_ISR_done:
 	pop psw
 	pop acc
 	reti
-	
+;------------------------------------------------------------------------------------------------------
+;=============================================
+; update minute every 60s
+; part of the Timer 1 ISR 
+;=============================================	
 minute_change:
 	mov a, second
 	mov a, #0x00
@@ -199,7 +214,10 @@ minute_change:
 	subb a, minute
 	jz hour_change
 	ljmp Timer0_ISR_done
-	
+;=============================================
+; update hour every 60mins
+; part of the Timer 1 ISR 
+;=============================================		
 hour_change:
 	mov a, minute
 	mov a, #0x00
@@ -219,11 +237,19 @@ hour_change:
 	jz day_change
 	
 	ljmp Timer0_ISR_done
+;=============================================
+; update hour every 12hrs
+; part of the Timer 1 ISR 
+;=============================================	
 day_change:
 	mov a, hour
 	mov a, #0x01
 	mov hour, a
 	ljmp Timer0_ISR_done
+;=============================================
+; update am/pm every 12hrs
+; part of the Timer 1 ISR 
+;=============================================	
 am_pm_change:
 	mov a, am_pm_sel
 	jz pm_am_change
@@ -235,16 +261,15 @@ pm_am_change:
 	mov am_pm_sel, a
 	ljmp Timer0_ISR_done
 ;------------------------------------------------------------------------------------------------------
-cseg
 ;============================================================================
 ; MAIN PROGRAM
 ;============================================================================
 main:
 	lcall Initialize_All
-	mov second, #0x00
-	mov minute, #0x19
-	mov hour,  #0x22
-	mov a, #0x01
+	mov second, #0x01
+	mov minute, #0x40
+	mov hour,  #0x10
+	mov a, #0x00
 	mov am_pm_sel,a
     ; For convenience a few handy macros are included in 'LCD_4bit.inc':
 	Set_Cursor(1, 1)
@@ -254,6 +279,8 @@ main:
 	
 
 loop:
+
+	setb mode
     clr one_second_flag 
     Set_Cursor(2, 7)     
 	Display_BCD(second) 
@@ -264,11 +291,40 @@ loop:
 	mov a, am_pm_sel
 	jz display_am
 	Set_Cursor(2, 14) 
-  	Send_Constant_String(#pm) 
+  	Send_Constant_String(#pm)
+  	
+	;Button_Press_Check(RESET_TIME)
+
+
+  	
+  
     ljmp loop
 
 display_am:
- Set_Cursor(2, 14) 
-  Send_Constant_String(#am)
-  ljmp loop
+	Set_Cursor(2, 14) 
+    Send_Constant_String(#am)
+    ret
+
+    
+sudo_reset_ISR:
+	 mov a,#0x00
+	 mov TR0, a
+ 		
+	jb SECOND_ADJUST,  sudo_reset_ISR  
+	Wait_Milli_Seconds(#50)	
+	jb SECOND_ADJUST,  sudo_reset_ISR
+	 
+	mov a, second
+	add a, #0x01
+	da a
+	mov second, a
+	
+	
+	Set_Cursor(2, 7)     
+	Display_BCD(second) 
+	jnb SECOND_ADJUST,  $ 
+	 
+	ljmp sudo_reset_ISR
+	  
+
 END
