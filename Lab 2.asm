@@ -11,12 +11,12 @@ $LIST
 ;Note: 
 ;	The frequency of the oscillator is 24 mHz.
 ;	However, we will divide it by 48, and then feed it to the Timer 1 and Timer 2
-;	As a result, F_{timer 1}=(24mHz/48)/(2^16-15536) = 10Hz
-;	Hence, the interrupt frequency of Timer1 is exactly 10 Hz
+;	As a result, F_{timer 1}=(24mHz/48)/(2^16-60536) = 100Hz
+;	Hence, the interrupt frequency of Timer1 is exactly 100 Hz
 
 CLK           EQU 24000000 ; Microcontroller system crystal frequency in Hz
-TIMER0_RATE   EQU 10    
-TIMER0_RELOAD EQU 15536
+TIMER0_RATE   EQU 100
+TIMER0_RELOAD EQU 60536
 
 
 ;------------------------------------------------------------------------------------------------------
@@ -64,7 +64,7 @@ minute:ds 1
 hour: ds 1
 bseg
 one_second_flag: dbit 1 ;
-
+am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
 
 
 ;------------------------------------------------------------------------------------------------------
@@ -89,6 +89,8 @@ $LIST
 
 Initial_Message:  db 'Time:', 0
 format: db '  :  :  ',0
+am: db 'AM',0
+pm: db 'PM',0
 ;------------------------------------------------------------------------------------------------------
 ;=======================
 ;HARDWARE INITIALIZATION
@@ -161,7 +163,7 @@ Timer0_ISR:
 
 	inc Count1s
 	mov a, count1s
-	cjne a, #10, Timer0_ISR_done
+	cjne a, #102, Timer0_ISR_done
 	
 	setb one_second_flag
 	clr a
@@ -172,12 +174,10 @@ Timer0_ISR:
 	da a 
 	mov second, a
 	
-	mov a, #0x59
-	add a,#0x1
-	da a
+	mov a, #0x60
 	subb a, second
 	
-	jz minute_add
+	jz minute_change
 
 Timer0_ISR_done:
 
@@ -185,7 +185,7 @@ Timer0_ISR_done:
 	pop acc
 	reti
 	
-minute_add:
+minute_change:
 	mov a, second
 	mov a, #0x00
 	mov second, a
@@ -195,11 +195,12 @@ minute_add:
 	da a
 	mov minute, a
 	
-
-	
+	mov a, #0x60
+	subb a, minute
+	jz hour_change
 	ljmp Timer0_ISR_done
 	
-hour_add:
+hour_change:
 	mov a, minute
 	mov a, #0x00
 	mov minute, a
@@ -208,6 +209,30 @@ hour_add:
 	add a,#0x01
 	da a
 	mov hour, a
+	
+	mov a, #0x12
+	subb a, hour
+	jz am_pm_change
+	
+	mov a, #0x13
+	subb a, hour
+	jz day_change
+	
+	ljmp Timer0_ISR_done
+day_change:
+	mov a, hour
+	mov a, #0x01
+	mov hour, a
+	ljmp Timer0_ISR_done
+am_pm_change:
+	mov a, am_pm_sel
+	jz pm_am_change
+	clr a
+	mov am_pm_sel, a
+	ljmp Timer0_ISR_done
+pm_am_change:
+	mov a, #0x01
+	mov am_pm_sel, a
 	ljmp Timer0_ISR_done
 ;------------------------------------------------------------------------------------------------------
 cseg
@@ -216,15 +241,17 @@ cseg
 ;============================================================================
 main:
 	lcall Initialize_All
-	
+	mov second, #0x00
+	mov minute, #0x19
+	mov hour,  #0x22
+	mov a, #0x01
+	mov am_pm_sel,a
     ; For convenience a few handy macros are included in 'LCD_4bit.inc':
 	Set_Cursor(1, 1)
     Send_Constant_String(#Initial_Message)
     Set_Cursor(2, 1)
     Send_Constant_String(#format)
-	mov second, #0x55
-	mov minute, #0x59
-	mov hour, #0x00
+	
 
 loop:
     clr one_second_flag 
@@ -233,8 +260,15 @@ loop:
     Set_Cursor(2, 4)     
 	Display_BCD(minute) 
 	Set_Cursor(2, 1)     
-	Display_BCD(hour) 
+	Display_BCD(hour)
+	mov a, am_pm_sel
+	jz display_am
+	Set_Cursor(2, 14) 
+  	Send_Constant_String(#pm) 
     ljmp loop
 
- 
+display_am:
+ Set_Cursor(2, 14) 
+  Send_Constant_String(#am)
+  ljmp loop
 END
