@@ -4,11 +4,11 @@ $MODEFM8LB1
 $LIST
 
 Button_Press_Check mac
-	jb %0, loop  ; if the 'BOOT' button is not pressed skip
+	jb %0, loopB  ; if the 'BOOT' button is not pressed skip
 	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
-	jb %0, loop  ; if the 'BOOT' button is not pressed skip
+	jb %0, loopB  ; if the 'BOOT' button is not pressed skip
 	jnb %0, $
-	ljmp sudo_reset_ISR
+	ljmp sudo_reset_ISR_A
 	endmac	
 ;------------------------------------------------------------------------------------------------------
 ;====================
@@ -73,6 +73,7 @@ bseg
 one_second_flag: dbit 1 ;
 am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
 mode:dbit 1
+reset: dbit 1
 
 
 ;------------------------------------------------------------------------------------------------------
@@ -83,8 +84,9 @@ BOOT_BUTTON   equ P3.7
 SOUND_OUT     equ P2.1
 UPDOWN        equ P0.0
 RESET_TIME    equ p0.1
-MODE_ADJUST   equ p0.3
 SECOND_ADJUST equ p0.5
+MINUTE_ADJUST equ p1.2
+HOUR_ADJUST   equ p1.5
 cseg
 LCD_RS equ P2.0
 LCD_RW equ P1.7
@@ -263,11 +265,12 @@ pm_am_change:
 ;------------------------------------------------------------------------------------------------------
 ;============================================================================
 ; MAIN PROGRAM
+
 ;============================================================================
 main:
 	lcall Initialize_All
-	mov second, #0x01
-	mov minute, #0x40
+	mov second, #0x00
+	mov minute, #0x55
 	mov hour,  #0x10
 	mov a, #0x00
 	mov am_pm_sel,a
@@ -278,7 +281,7 @@ main:
     Send_Constant_String(#format)
 	
 
-loop:
+loopA:
 
 	setb mode
     clr one_second_flag 
@@ -288,43 +291,86 @@ loop:
 	Display_BCD(minute) 
 	Set_Cursor(2, 1)     
 	Display_BCD(hour)
+
+		
+	Button_Press_Check(RESET_TIME)
+	sjmp loopB
+loopB:
 	mov a, am_pm_sel
 	jz display_am
 	Set_Cursor(2, 14) 
   	Send_Constant_String(#pm)
-  	
-	;Button_Press_Check(RESET_TIME)
-
-
-  	
-  
-    ljmp loop
+    ljmp loopA
 
 display_am:
 	Set_Cursor(2, 14) 
     Send_Constant_String(#am)
-    ret
+  
+    ljmp loopA
 
-    
-sudo_reset_ISR:
+;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    
+sudo_reset_ISR_A:
+;---------------------------------
 	 mov a,#0x00
 	 mov TR0, a
- 		
-	jb SECOND_ADJUST,  sudo_reset_ISR  
+	 mov a,#0x01
+	 mov reset,a
+;------------------------------------------------------ 		
+	jb SECOND_ADJUST,  sudo_reset_ISR_B
 	Wait_Milli_Seconds(#50)	
-	jb SECOND_ADJUST,  sudo_reset_ISR
-	 
+	jb SECOND_ADJUST,  sudo_reset_ISR_B
+	jnb SECOND_ADJUST,  $ 
 	mov a, second
 	add a, #0x01
 	da a
 	mov second, a
+	sjmp sudo_reset_ISR_B
 	
+sudo_reset_ISR_B:	
+	jb MINUTE_ADJUST,  sudo_reset_ISR_C
+	Wait_Milli_Seconds(#50)	
+	jb MINUTE_ADJUST,  sudo_reset_ISR_C
+	jnb MINUTE_ADJUST,  $ 
 	
+	mov a, minute
+	add a, #0x01
+	da a
+	mov minute, a
+	sjmp sudo_reset_ISR_C
+	
+sudo_reset_ISR_Z:
+	ljmp sudo_reset_ISR_A
+	
+sudo_reset_ISR_C:
+	jb HOUR_ADJUST,  display
+	Wait_Milli_Seconds(#50)	
+	jb HOUR_ADJUST,  display
+	jnb HOUR_ADJUST,  $ 
+	
+	mov a, hour
+	add a, #0x01
+	da a
+	mov hour, a
+	sjmp display	
+
+display:
 	Set_Cursor(2, 7)     
 	Display_BCD(second) 
-	jnb SECOND_ADJUST,  $ 
-	 
-	ljmp sudo_reset_ISR
+	Set_Cursor(2, 4)     
+	Display_BCD(minute)
+	Set_Cursor(2, 1)     
+	Display_BCD(hour)
+	ljmp sudo_unmask
+sudo_unmask:
+	jb RESET_TIME,  sudo_reset_ISR_Z
+	Wait_Milli_Seconds(#50)	
+	jb RESET_TIME,  sudo_reset_ISR_Z
+	jnb RESET_TIME,  $ 
+	mov a,#0x00
+	mov TR0, a
+	ljmp loopA
+;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ 
 	  
+
 
 END
