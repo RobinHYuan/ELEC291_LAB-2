@@ -87,6 +87,7 @@ RESET_TIME    equ p0.1
 SECOND_ADJUST equ p0.5
 MINUTE_ADJUST equ p1.2
 HOUR_ADJUST   equ p1.5
+AM_PM_ADJUST  equ p3.3
 cseg
 LCD_RS equ P2.0
 LCD_RW equ P1.7
@@ -270,8 +271,8 @@ pm_am_change:
 main:
 	lcall Initialize_All
 	mov second, #0x00
-	mov minute, #0x55
-	mov hour,  #0x10
+	mov minute, #0x00
+	mov hour,  #0x00
 	mov a, #0x00
 	mov am_pm_sel,a
     ; For convenience a few handy macros are included in 'LCD_4bit.inc':
@@ -338,21 +339,31 @@ sudo_reset_ISR_B:
 	mov minute, a
 	sjmp sudo_reset_ISR_C
 	
-sudo_reset_ISR_Z:
-	ljmp sudo_reset_ISR_A
+
 	
 sudo_reset_ISR_C:
-	jb HOUR_ADJUST,  display
+	jb HOUR_ADJUST,  sudo_reset_ISR_D
 	Wait_Milli_Seconds(#50)	
-	jb HOUR_ADJUST,  display
+	jb HOUR_ADJUST,  sudo_reset_ISR_D
 	jnb HOUR_ADJUST,  $ 
 	
 	mov a, hour
 	add a, #0x01
 	da a
 	mov hour, a
-	sjmp display	
-
+	sjmp sudo_reset_ISR_D
+	
+sudo_reset_ISR_D:
+		
+	jb AM_PM_ADJUST,  display
+	Wait_Milli_Seconds(#50)	
+	jb AM_PM_ADJUST,  display
+	jnb AM_PM_ADJUST,  $
+	mov a,  am_pm_sel
+	cpl a
+	mov am_pm_sel, a
+	ljmp display
+	
 display:
 	Set_Cursor(2, 7)     
 	Display_BCD(second) 
@@ -360,7 +371,22 @@ display:
 	Display_BCD(minute)
 	Set_Cursor(2, 1)     
 	Display_BCD(hour)
+	
+	
+	mov a, am_pm_sel
+	jz display_am_ISR
+	Set_Cursor(2, 14) 
+  	Send_Constant_String(#pm)
+    ljmp sudo_unmask
+
+sudo_reset_ISR_Z:
+	ljmp sudo_reset_ISR_A
+	
+display_am_ISR:
+	Set_Cursor(2, 14) 
+    Send_Constant_String(#am)
 	ljmp sudo_unmask
+	
 sudo_unmask:
 	jb RESET_TIME,  sudo_reset_ISR_Z
 	Wait_Milli_Seconds(#50)	
