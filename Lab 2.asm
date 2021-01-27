@@ -312,22 +312,22 @@ display_am:
 ;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    
 sudo_reset_ISR_A:
 ;---------------------------------
-	 mov a,#0x00
+	 mov a,#0x00; we stop the timer here
 	 mov TR0, a
-	 mov a,#0x01
+	 mov a,#0x01; we also mask it 
 	 mov reset,a
 ;------------------------------------------------------ 		
-	jb SECOND_ADJUST,  sudo_reset_ISR_B
+	jb SECOND_ADJUST,  sudo_reset_ISR_B; check whether second_adjust button is pressed
 	Wait_Milli_Seconds(#50)	
-	jb SECOND_ADJUST,  sudo_reset_ISR_B
+	jb SECOND_ADJUST,  sudo_reset_ISR_B; if not, go check minute
 	jnb SECOND_ADJUST,  $ 
-	mov a, second
+	mov a, second; if pressed, add one
 	add a, #0x01
 	da a
 	mov second, a
-	sjmp sudo_reset_ISR_B
+	sjmp sudo_reset_ISR_B ; go to minute after checking second
 	
-sudo_reset_ISR_B:	
+sudo_reset_ISR_B:	;check minute
 	jb MINUTE_ADJUST,  sudo_reset_ISR_C
 	Wait_Milli_Seconds(#50)	
 	jb MINUTE_ADJUST,  sudo_reset_ISR_C
@@ -341,7 +341,7 @@ sudo_reset_ISR_B:
 	
 
 	
-sudo_reset_ISR_C:
+sudo_reset_ISR_C: ;check hour
 	jb HOUR_ADJUST,  sudo_reset_ISR_D
 	Wait_Milli_Seconds(#50)	
 	jb HOUR_ADJUST,  sudo_reset_ISR_D
@@ -353,7 +353,7 @@ sudo_reset_ISR_C:
 	mov hour, a
 	sjmp sudo_reset_ISR_D
 	
-sudo_reset_ISR_D:
+sudo_reset_ISR_D: ;check am/pm
 		
 	jb AM_PM_ADJUST,  display
 	Wait_Milli_Seconds(#50)	
@@ -364,7 +364,7 @@ sudo_reset_ISR_D:
 	mov am_pm_sel, a
 	ljmp display
 	
-display:
+display: ;display result
 	Set_Cursor(2, 7)     
 	Display_BCD(second) 
 	Set_Cursor(2, 4)     
@@ -387,7 +387,7 @@ display_am_ISR:
     Send_Constant_String(#am)
 	ljmp sudo_unmask
 	
-sudo_unmask:
+sudo_unmask: ;unmask, restart timer, then go back to the regular loop
 	jb RESET_TIME,  sudo_reset_ISR_Z
 	Wait_Milli_Seconds(#50)	
 	jb RESET_TIME,  sudo_reset_ISR_Z
