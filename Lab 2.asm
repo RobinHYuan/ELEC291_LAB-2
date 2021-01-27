@@ -8,7 +8,7 @@ Button_Press_Check mac
 	Wait_Milli_Seconds(#50)	; Debounce delay.  This macro is also in 'LCD_4bit.inc'
 	jb %0, loopB  ; if the 'BOOT' button is not pressed skip
 	jnb %0, $
-	ljmp sudo_reset_ISR_A
+	ljmp sudo_reset_ISR_begin
 	endmac	
 ;------------------------------------------------------------------------------------------------------
 ;====================
@@ -69,12 +69,16 @@ Count1s:      ds 1
 second:  ds 1 
 minute:ds 1
 hour: ds 1
+alarm_second:  ds 1 
+alarm_minute:ds 1
+alarm_hour: ds 1
 bseg
 one_second_flag: dbit 1 ;
 am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
-mode:dbit 1
+mode:  dbit 1
 reset: dbit 1
-
+alarm: dbit 1
+alarm_am_pm_sel: dbit 1
 
 ;------------------------------------------------------------------------------------------------------
 ;===============
@@ -88,6 +92,8 @@ SECOND_ADJUST equ p0.5
 MINUTE_ADJUST equ p1.2
 HOUR_ADJUST   equ p1.5
 AM_PM_ADJUST  equ p3.3
+ALARM_SET     equ p3.0
+ALARM_DISPLAY equ p2.4
 cseg
 LCD_RS equ P2.0
 LCD_RW equ P1.7
@@ -101,6 +107,7 @@ $include(LCD_4bit.inc) ; A library of LCD related functions and utility macros
 $LIST
 
 Initial_Message:  db 'Time:', 0
+Alarm_Message:  db 'ALARM:', 0
 format: db '  :  :  ',0
 am: db 'AM',0
 pm: db 'PM',0
@@ -273,29 +280,47 @@ main:
 	mov second, #0x00
 	mov minute, #0x00
 	mov hour,  #0x00
+	mov alarm_second, #0x00
+	mov alarm_minute, #0x00
+	mov alarm_hour,  #0x00
+	mov a,#0x00
+	mov alarm_am_pm_sel,a
 	mov a, #0x00
 	mov am_pm_sel,a
-    ; For convenience a few handy macros are included in 'LCD_4bit.inc':
-	Set_Cursor(1, 1)
-    Send_Constant_String(#Initial_Message)
-    Set_Cursor(2, 1)
-    Send_Constant_String(#format)
+    ;
 	
 
 loopA:
 
 	setb mode
     clr one_second_flag 
+    	
+	jb ALARM_SET,loopD   
+	Wait_Milli_Seconds(#50)
+	jb ALARM_SET, loopD
+	jnb ALARM_SET, $
+	ljmp sudo_alarm_ISR_begin
+
+loopD:
+	jb ALARM_DISPLAY,loopC   
+	Wait_Milli_Seconds(#50)
+	jb ALARM_DISPLAY, loopC
+	jnb ALARM_DISPLAY, $
+	ljmp display_alarm
+loopC:
+	Set_Cursor(1, 1)
+    Send_Constant_String(#Initial_Message)
+    Set_Cursor(2, 1)
+    Send_Constant_String(#format)   
     Set_Cursor(2, 7)     
 	Display_BCD(second) 
     Set_Cursor(2, 4)     
 	Display_BCD(minute) 
 	Set_Cursor(2, 1)     
 	Display_BCD(hour)
-
-		
-	Button_Press_Check(RESET_TIME)
+	Button_Press_Check(RESET_TIME)		
 	sjmp loopB
+	
 loopB:
 	mov a, am_pm_sel
 	jz display_am
@@ -306,28 +331,116 @@ loopB:
 display_am:
 	Set_Cursor(2, 14) 
     Send_Constant_String(#am)
-  
     ljmp loopA
+    
+    
+sudo_alarm_ISR_begin:
+    mov alarm_second, #0x00
+	mov alarm_minute, #0x00
+	mov alarm_hour,  #0x00
+	sjmp sudo_alarm_ISR_A
+sudo_alarm_ISR_A:
+
+ 	jb SECOND_ADJUST,  sudo_alarm_ISR_B
+	Wait_Milli_Seconds(#50)	
+	jb SECOND_ADJUST,  sudo_alarm_ISR_B
+	jnb SECOND_ADJUST,  $ 
+	mov a, alarm_second
+	add a, #0x01
+	da a
+	mov alarm_second, a
+	sjmp sudo_alarm_ISR_B
+	
+sudo_alarm_ISR_B:
+
+	jb MINUTE_ADJUST,  sudo_alarm_ISR_C
+	Wait_Milli_Seconds(#50)	
+	jb MINUTE_ADJUST,  sudo_alarm_ISR_C
+	jnb MINUTE_ADJUST,  $ 
+	
+	mov a, alarm_minute
+	add a, #0x01
+	da a
+	mov alarm_minute, a
+	sjmp sudo_alarm_ISR_C
+sudo_alarm_ISR_C:
+	jb HOUR_ADJUST,  sudo_alarm_ISR_D
+	Wait_Milli_Seconds(#50)	
+	jb HOUR_ADJUST,  sudo_alarm_ISR_D
+	jnb HOUR_ADJUST,  $ 
+	
+	mov a, alarm_hour
+	add a, #0x01
+	da a
+	mov alarm_hour, a
+	sjmp sudo_alarm_ISR_D
+sudo_alarm_ISR_D:
+		
+	jb AM_PM_ADJUST,  display_alarm
+	Wait_Milli_Seconds(#50)	
+	jb AM_PM_ADJUST,  display_alarm
+	jnb AM_PM_ADJUST,  $
+	mov a,  alarm_am_pm_sel
+	cpl a
+	mov alarm_am_pm_sel, a
+	ljmp display_alarm
+display_alarm:			
+	Set_Cursor(1, 1)
+    Send_Constant_String(#Alarm_Message)
+    Set_Cursor(2, 1)
+    Send_Constant_String(#format)
+  	Set_Cursor(2, 7)     
+	Display_BCD(alarm_second) 
+    Set_Cursor(2, 4)     
+	Display_BCD(alarm_minute) 
+	Set_Cursor(2, 1)     
+	Display_BCD(alarm_hour)
+	
+	mov a, alarm_am_pm_sel
+	jz display_am_alarm
+	Set_Cursor(2, 14) 
+  	Send_Constant_String(#pm)
+    ljmp sudo_alarm_ISR_End
+ sudo_alarm_ISR_A_MID:
+ 	ljmp sudo_alarm_ISR_A
+ 	   
+sudo_alarm_ISR_End:
+	jb ALARM_SET,sudo_alarm_ISR_A_MID
+	Wait_Milli_Seconds(#50)
+	jb ALARM_SET, sudo_alarm_ISR_A_MID
+	jnb ALARM_SET, $
+	ljmp loopA
+	
+display_am_alarm:
+	Set_Cursor(2, 14) 
+    Send_Constant_String(#am)
+	ljmp sudo_alarm_ISR_End
 
 ;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++    
+sudo_reset_ISR_begin:
+	mov second, #0x00
+	mov minute, #0x00
+	mov hour,  #0x00
+	sjmp sudo_reset_ISR_A
 sudo_reset_ISR_A:
 ;---------------------------------
-	 mov a,#0x00; we stop the timer here
+	 mov a,#0x00
 	 mov TR0, a
-	 mov a,#0x01; we also mask it 
+	 mov a,#0x01
 	 mov reset,a
+
 ;------------------------------------------------------ 		
-	jb SECOND_ADJUST,  sudo_reset_ISR_B; check whether second_adjust button is pressed
+	jb SECOND_ADJUST,  sudo_reset_ISR_B
 	Wait_Milli_Seconds(#50)	
-	jb SECOND_ADJUST,  sudo_reset_ISR_B; if not, go check minute
+	jb SECOND_ADJUST,  sudo_reset_ISR_B
 	jnb SECOND_ADJUST,  $ 
-	mov a, second; if pressed, add one
+	mov a, second
 	add a, #0x01
 	da a
 	mov second, a
-	sjmp sudo_reset_ISR_B ; go to minute after checking second
+	sjmp sudo_reset_ISR_B
 	
-sudo_reset_ISR_B:	;check minute
+sudo_reset_ISR_B:	
 	jb MINUTE_ADJUST,  sudo_reset_ISR_C
 	Wait_Milli_Seconds(#50)	
 	jb MINUTE_ADJUST,  sudo_reset_ISR_C
@@ -341,7 +454,7 @@ sudo_reset_ISR_B:	;check minute
 	
 
 	
-sudo_reset_ISR_C: ;check hour
+sudo_reset_ISR_C:
 	jb HOUR_ADJUST,  sudo_reset_ISR_D
 	Wait_Milli_Seconds(#50)	
 	jb HOUR_ADJUST,  sudo_reset_ISR_D
@@ -353,7 +466,7 @@ sudo_reset_ISR_C: ;check hour
 	mov hour, a
 	sjmp sudo_reset_ISR_D
 	
-sudo_reset_ISR_D: ;check am/pm
+sudo_reset_ISR_D:
 		
 	jb AM_PM_ADJUST,  display
 	Wait_Milli_Seconds(#50)	
@@ -364,7 +477,7 @@ sudo_reset_ISR_D: ;check am/pm
 	mov am_pm_sel, a
 	ljmp display
 	
-display: ;display result
+display:
 	Set_Cursor(2, 7)     
 	Display_BCD(second) 
 	Set_Cursor(2, 4)     
@@ -387,7 +500,7 @@ display_am_ISR:
     Send_Constant_String(#am)
 	ljmp sudo_unmask
 	
-sudo_unmask: ;unmask, restart timer, then go back to the regular loop
+sudo_unmask:
 	jb RESET_TIME,  sudo_reset_ISR_Z
 	Wait_Milli_Seconds(#50)	
 	jb RESET_TIME,  sudo_reset_ISR_Z
