@@ -24,7 +24,8 @@ Button_Press_Check mac
 CLK           EQU 24000000 ; Microcontroller system crystal frequency in Hz
 TIMER0_RATE   EQU 100
 TIMER0_RELOAD EQU 60536
-
+TIMER1_RATE   EQU 1000*2    
+TIMER1_RELOAD EQU ((65536-(CLK/(TIMER0_RATE))))
 
 ;------------------------------------------------------------------------------------------------------
 ;=================
@@ -57,7 +58,7 @@ org 0x0023
 	
 ; Timer/Counter 2 overflow interrupt vector
 org 0x002B
-	reti
+ljmp	BUZZ_ISR
 	
 ;------------------------------------------------------------------------------------------------------
 ;====================
@@ -72,6 +73,7 @@ hour: ds 1
 alarm_second:  ds 1 
 alarm_minute:ds 1
 alarm_hour: ds 1
+alarm_counter: ds 1
 bseg
 one_second_flag: dbit 1 ;
 am_pm_sel: dbit 1; // 0 stands for am; 1 stands for pm
@@ -79,7 +81,8 @@ mode:  dbit 1
 reset: dbit 1
 alarm: dbit 1
 alarm_am_pm_sel: dbit 1
-
+alarm_time :dbit 1
+alarm_setup: dbit 1
 ;------------------------------------------------------------------------------------------------------
 ;===============
 ;PIN ASSIGNMENT:
@@ -141,8 +144,8 @@ waitclockstable:
 	jnb acc.7, waitclockstable 
 
     lcall Timer0_Init
-
-
+	lcall BUZZ_Init
+	
     lcall LCD_4BIT 
     
     setb EA   ; Enable Global interrupts
@@ -190,6 +193,10 @@ Timer0_ISR:
 	clr a
 	mov Count1s, a
 	
+	ljmp second_change
+
+
+second_change:	
 	mov a, second
 	add a, #0x01
 	da a 
@@ -201,7 +208,8 @@ Timer0_ISR:
 	jz minute_change
 
 Timer0_ISR_done:
-
+	ljmp Timer0_Alarm_Check
+Timer0_ISR_end:	
 	pop psw
 	pop acc
 	reti
@@ -277,17 +285,20 @@ pm_am_change:
 ;============================================================================
 main:
 	lcall Initialize_All
-	mov second, #0x00
-	mov minute, #0x00
-	mov hour,  #0x00
+	mov second, #0x50
+	mov minute, #0x59
+	mov hour,  #0x11
+	mov alarm_setup, a
 	mov alarm_second, #0x00
 	mov alarm_minute, #0x00
-	mov alarm_hour,  #0x00
-	mov a,#0x00
+	mov alarm_hour,  #0x12
+	mov a,#0x01
 	mov alarm_am_pm_sel,a
-	mov a, #0x00
+	mov a, #0x01
 	mov am_pm_sel,a
-    ;
+    mov alarm_time,a
+	mov alarm_counter,a
+	clr TR2
 	
 
 loopA:
@@ -318,7 +329,8 @@ loopC:
 	Display_BCD(minute) 
 	Set_Cursor(2, 1)     
 	Display_BCD(hour)
-	Button_Press_Check(RESET_TIME)		
+	Button_Press_Check(RESET_TIME)	
+		
 	sjmp loopB
 	
 loopB:
@@ -338,6 +350,8 @@ sudo_alarm_ISR_begin:
     mov alarm_second, #0x00
 	mov alarm_minute, #0x00
 	mov alarm_hour,  #0x00
+	mov a,#0x01
+	mov alarm_setup, a
 	sjmp sudo_alarm_ISR_A
 sudo_alarm_ISR_A:
 
@@ -380,8 +394,13 @@ sudo_alarm_ISR_D:
 	Wait_Milli_Seconds(#50)	
 	jb AM_PM_ADJUST,  display_alarm
 	jnb AM_PM_ADJUST,  $
-	mov a,  alarm_am_pm_sel
-	cpl a
+	mov a, alarm_am_pm_sel
+	jz alarm_pm_am_change
+	clr a
+	mov alarm_am_pm_sel, a
+	ljmp display_alarm
+alarm_pm_am_change:
+	mov a, #0x01
 	mov alarm_am_pm_sel, a
 	ljmp display_alarm
 display_alarm:			
@@ -466,17 +485,20 @@ sudo_reset_ISR_C:
 	mov hour, a
 	sjmp sudo_reset_ISR_D
 	
-sudo_reset_ISR_D:
-		
+sudo_reset_ISR_D:		
 	jb AM_PM_ADJUST,  display
 	Wait_Milli_Seconds(#50)	
 	jb AM_PM_ADJUST,  display
 	jnb AM_PM_ADJUST,  $
-	mov a,  am_pm_sel
-	cpl a
+	mov a, am_pm_sel
+	jz time_pm_am_change
+	clr a
 	mov am_pm_sel, a
 	ljmp display
-	
+time_pm_am_change:
+	mov a, #0x01
+	mov am_pm_sel, a
+	ljmp display
 display:
 	Set_Cursor(2, 7)     
 	Display_BCD(second) 
@@ -509,7 +531,53 @@ sudo_unmask:
 	mov TR0, a
 	ljmp loopA
 ;+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ 
-	  
+Timer0_ISR_end_b:
+	ljmp Timer0_ISR_end	  
 
+Timer0_Alarm_Check:
 
-END
+	clr c
+	mov a, alarm_setup
+	jz Timer0_ISR_end_b
+	
+	clr c;
+	mov a, alarm_hour 
+	subb a, hour
+	jnz Timer0_ISR_end_b
+	
+	clr c
+	mov a, alarm_minute
+	subb a,minute
+	jnz Timer0_ISR_end_b
+	
+	clr c
+	mov a, alarm_second
+	subb a,second
+	jnz Timer0_ISR_end_b
+	
+	clr c
+	mov a, alarm_am_pm_sel
+	subb a, am_pm_sel
+	jnz Timer0_ISR_end_b
+	
+	setb TR2
+	ljmp Timer0_ISR_end
+	
+;===============================================================================================
+BUZZ_Init:
+	orl CKCON0, #0b00010000 ; Timer 2 uses the system clock
+	mov TMR2CN0, #0 ; Stop timer/counter.  Autoreload mode.
+	mov TMR2H, #high(TIMER1_RELOAD)
+	mov TMR2L, #low(TIMER1_RELOAD)
+	mov TMR2RLH, #high(TIMER1_RELOAD)
+	mov TMR2RLL, #low(TIMER1_RELOAD)
+
+    setb ET2  ; Enable timer 2 interrupt
+    setb TR2  ; Enable timer 2
+	ret
+
+BUZZ_ISR:
+	clr TF2H  ; Timer 2 doesn't clear TF2H automatically. Do it in ISR
+	setb TR0
+	cpl SOUND_OUT ; Toggle the pin connected to the speaker
+reti
