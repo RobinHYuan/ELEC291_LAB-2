@@ -249,7 +249,9 @@ hour_change:
 	mov a, #0x12
 	subb a, hour
 	jz am_pm_change
-	
+	sjmp hour_change2
+hour_change2:
+	clr c	
 	mov a, #0x13
 	subb a, hour
 	jz day_change
@@ -285,16 +287,16 @@ pm_am_change:
 ;============================================================================
 main:
 	lcall Initialize_All
-	mov second, #0x50
+	mov second, #0x55
 	mov minute, #0x59
-	mov hour,  #0x11
+	mov hour,  #0x12
 	mov alarm_setup, a
 	mov alarm_second, #0x00
 	mov alarm_minute, #0x00
 	mov alarm_hour,  #0x12
 	mov a,#0x01
 	mov alarm_am_pm_sel,a
-	mov a, #0x01
+	mov a, #0x00
 	mov am_pm_sel,a
     mov alarm_time,a
 	mov alarm_counter,a
