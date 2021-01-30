@@ -83,13 +83,14 @@ alarm: dbit 1
 alarm_am_pm_sel: dbit 1
 alarm_time :dbit 1
 alarm_setup: dbit 1
+alarm_On_off:dbit 1
 ;------------------------------------------------------------------------------------------------------
 ;===============
 ;PIN ASSIGNMENT:
 ;===============
 BOOT_BUTTON   equ P3.7
 SOUND_OUT     equ P2.1
-UPDOWN        equ P0.0
+ON_OFF        equ p2.2
 RESET_TIME    equ p0.1
 SECOND_ADJUST equ p0.5
 MINUTE_ADJUST equ p1.2
@@ -109,11 +110,13 @@ $NOLIST
 $include(LCD_4bit.inc) ; A library of LCD related functions and utility macros
 $LIST
 
-Initial_Message:  db 'Time:', 0
+Initial_Message:  db 'Time:              ', 0
 Alarm_Message:  db 'ALARM:', 0
 format: db '  :  :  ',0
 am: db 'AM',0
 pm: db 'PM',0
+on: db 'ON ',0
+off: db 'OFF',0
 ;------------------------------------------------------------------------------------------------------
 ;=======================
 ;HARDWARE INITIALIZATION
@@ -289,17 +292,19 @@ main:
 	lcall Initialize_All
 	mov second, #0x55
 	mov minute, #0x59
-	mov hour,  #0x12
+	mov hour,  #0x11
 	mov alarm_setup, a
 	mov alarm_second, #0x00
 	mov alarm_minute, #0x00
 	mov alarm_hour,  #0x12
 	mov a,#0x01
 	mov alarm_am_pm_sel,a
+	mov alarm_On_off,a
 	mov a, #0x00
 	mov am_pm_sel,a
     mov alarm_time,a
 	mov alarm_counter,a
+;	mov alarm_On_off,a
 	clr TR2
 	
 
@@ -364,6 +369,10 @@ sudo_alarm_ISR_A:
 	mov a, alarm_second
 	add a, #0x01
 	da a
+	CJNE a, #0x60, INCSEC
+	mov alarm_second, #0x00
+	sjmp sudo_alarm_ISR_B
+INCSEC:
 	mov alarm_second, a
 	sjmp sudo_alarm_ISR_B
 	
@@ -377,6 +386,10 @@ sudo_alarm_ISR_B:
 	mov a, alarm_minute
 	add a, #0x01
 	da a
+	CJNE a, #0x60, INC_MIN
+	mov alarm_minute, #0x00
+	sjmp sudo_alarm_ISR_C
+INC_MIN:
 	mov alarm_minute, a
 	sjmp sudo_alarm_ISR_C
 sudo_alarm_ISR_C:
@@ -388,22 +401,42 @@ sudo_alarm_ISR_C:
 	mov a, alarm_hour
 	add a, #0x01
 	da a
-	mov alarm_hour, a
+
+    
+	mov alarm_hour,a
+	subb a, #0x13
+	jnz sudo_alarm_ISR_D
+	mov alarm_hour, #0x00
 	sjmp sudo_alarm_ISR_D
-sudo_alarm_ISR_D:
-		
-	jb AM_PM_ADJUST,  display_alarm
+
+sudo_alarm_ISR_D:	
+	jb AM_PM_ADJUST,  alarm_off
 	Wait_Milli_Seconds(#50)	
-	jb AM_PM_ADJUST,  display_alarm
+	jb AM_PM_ADJUST,  alarm_off
 	jnb AM_PM_ADJUST,  $
 	mov a, alarm_am_pm_sel
 	jz alarm_pm_am_change
 	clr a
 	mov alarm_am_pm_sel, a
-	ljmp display_alarm
+	ljmp alarm_off
 alarm_pm_am_change:
 	mov a, #0x01
 	mov alarm_am_pm_sel, a
+	ljmp alarm_off
+alarm_off:
+	jb ON_OFF,  display_alarm
+	Wait_Milli_Seconds(#50)	
+	jb ON_OFF,  display_alarm
+	jnb ON_OFF,  $ 
+	mov a, alarm_On_off
+	jz alarm_on
+	clr a
+	mov alarm_On_off,a
+	clr tr2
+	ljmp display_alarm
+alarm_on:
+	mov a, #0x01
+	mov alarm_On_off , a
 	ljmp display_alarm
 display_alarm:			
 	Set_Cursor(1, 1)
@@ -417,6 +450,16 @@ display_alarm:
 	Set_Cursor(2, 1)     
 	Display_BCD(alarm_hour)
 	
+	mov a,alarm_On_off
+	jz display_off
+	Set_Cursor(1, 14)
+    Send_Constant_String(#on)
+    sjmp display_pm_alarm
+display_off:
+	Set_Cursor(1, 14)
+    Send_Constant_String(#off)
+    sjmp display_pm_alarm
+display_pm_alarm:
 	mov a, alarm_am_pm_sel
 	jz display_am_alarm
 	Set_Cursor(2, 14) 
@@ -459,6 +502,11 @@ sudo_reset_ISR_A:
 	add a, #0x01
 	da a
 	mov second, a
+	CJNE a, #0x60, INC_timeSEC
+	mov second, #0x00
+	sjmp sudo_reset_ISR_B
+INC_timeSEC:
+	mov second, a
 	sjmp sudo_reset_ISR_B
 	
 sudo_reset_ISR_B:	
@@ -471,9 +519,13 @@ sudo_reset_ISR_B:
 	add a, #0x01
 	da a
 	mov minute, a
+	CJNE a, #0x60, INC_timeMIN
+	mov minute, #0x00
+	sjmp sudo_reset_ISR_C
+INC_timeMIN:
+	mov minute, a
 	sjmp sudo_reset_ISR_C
 	
-
 	
 sudo_reset_ISR_C:
 	jb HOUR_ADJUST,  sudo_reset_ISR_D
@@ -484,6 +536,11 @@ sudo_reset_ISR_C:
 	mov a, hour
 	add a, #0x01
 	da a
+	mov hour, a
+	CJNE a, #0x13, INC_timeHOUR
+	mov hour, #0x00
+	sjmp sudo_reset_ISR_D
+INC_timeHOUR:
 	mov hour, a
 	sjmp sudo_reset_ISR_D
 	
@@ -537,7 +594,12 @@ Timer0_ISR_end_b:
 	ljmp Timer0_ISR_end	  
 
 Timer0_Alarm_Check:
-
+	mov a,alarm_On_off
+	jnz Timer0_Alarm_Check2
+	mov a,#0x00
+	mov tr2,a
+	ljmp Timer0_ISR_end
+Timer0_Alarm_Check2:
 	clr c
 	mov a, alarm_setup
 	jz Timer0_ISR_end_b
@@ -574,12 +636,21 @@ BUZZ_Init:
 	mov TMR2RLH, #high(TIMER1_RELOAD)
 	mov TMR2RLL, #low(TIMER1_RELOAD)
 
-    setb ET2  ; Enable timer 2 interrupt
-    setb TR2  ; Enable timer 2
+    setb ET2 
+    setb TR2  
 	ret
 
 BUZZ_ISR:
-	clr TF2H  ; Timer 2 doesn't clear TF2H automatically. Do it in ISR
-	setb TR0
+	clr TF2h
+	push acc  
+	mov a, alarm_On_off
+	jnz BUZZ
+	clr tr2
+	ljmp BUZZ_ISR_END
+BUZZ:
+	setb TR2
 	cpl SOUND_OUT ; Toggle the pin connected to the speaker
-reti
+	ljmp BUZZ_ISR_END
+BUZZ_ISR_END:
+	pop acc
+	reti
